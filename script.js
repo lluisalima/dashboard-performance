@@ -1,8 +1,9 @@
 // ============================================================
-// PAINEL DE PRESENÇA - STELLANTIS
+// PAINEL DE PRESENÇA — STELLANTIS
+// Cada data tem seu próprio registro de presença salvo no navegador.
 // ============================================================
 
-const DADOS_INICIAIS = {
+const EQUIPE_INICIAL = {
   data: "27/07/2026",
   grupos: [
     {
@@ -92,550 +93,298 @@ const DADOS_INICIAIS = {
       ]
     }
   ]
-};
+};;
 
-let dados = JSON.parse(JSON.stringify(DADOS_INICIAIS));
-const STORAGE_KEY = "painel-presenca-stellantis";
+const STORAGE_KEY = "painel-presenca-stellantis-v2";
+let painel = { grupos: [], registros: {} };
+let dataAtual = "";
 const expandido = new Set();
-let graficoPresenca = null;
-let graficoFaltas = null;
-let graficoProjetos = null;
-let graficoMeses = null;
+const graficos = { presenca: null, faltas: null, projetos: null, meses: null };
 
-function clonarDadosIniciais() {
-  return JSON.parse(JSON.stringify(DADOS_INICIAIS));
+function hojeISO() {
+  const agora = new Date();
+  const fuso = agora.getTimezoneOffset() * 60000;
+  return new Date(agora.getTime() - fuso).toISOString().slice(0, 10);
 }
 
-function salvarDados() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(dados));
+function clone(valor) { return JSON.parse(JSON.stringify(valor)); }
+function chavePessoa(gi, mi) { return `${gi}-${mi}`; }
+
+function criarPainelInicial() {
+  const data = hojeISO();
+  const grupos = clone(EQUIPE_INICIAL.grupos);
+  const statusIniciais = {};
+  grupos.forEach((grupo, gi) => grupo.membros.forEach((membro, mi) => {
+    statusIniciais[chavePessoa(gi, mi)] = membro.status || "PRESENTE";
+    membro.status = "PRESENTE";
+  }));
+  return { grupos, registros: { [data]: { status: statusIniciais } } };
 }
 
-function carregarDados() {
-  const salvo = localStorage.getItem(STORAGE_KEY);
-  if (!salvo) {
-    dados = clonarDadosIniciais();
-    return;
-  }
+function migrarVersaoAntiga(antigo) {
+  if (!antigo || !antigo.grupos) return null;
+  const data = hojeISO();
+  const grupos = clone(antigo.grupos);
+  const status = {};
+  grupos.forEach((grupo, gi) => grupo.membros.forEach((membro, mi) => {
+    status[chavePessoa(gi, mi)] = membro.status || "PRESENTE";
+    membro.status = "PRESENTE";
+  }));
+  return { grupos, registros: { [data]: { status } } };
+}
 
+function carregarPainel() {
   try {
-    dados = JSON.parse(salvo);
+    const salvo = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (salvo && Array.isArray(salvo.grupos) && salvo.registros) { painel = salvo; return; }
+    const antigo = JSON.parse(localStorage.getItem("painel-presenca-stellantis"));
+    painel = migrarVersaoAntiga(antigo) || criarPainelInicial();
+    salvarPainel();
   } catch (erro) {
-    dados = clonarDadosIniciais();
+    painel = criarPainelInicial();
+    salvarPainel();
   }
 }
 
-function resetarDados() {
-  if (!confirm("Tem certeza? Isso vai apagar as edições e voltar ao painel original.")) return;
-  dados = clonarDadosIniciais();
-  localStorage.removeItem(STORAGE_KEY);
-  abrirTodosGrupos();
-  renderizarTudo();
-  alert("✅ Dados resetados com sucesso.");
+function salvarPainel() { localStorage.setItem(STORAGE_KEY, JSON.stringify(painel)); }
+
+function garantirRegistro(data) {
+  if (!painel.registros[data]) painel.registros[data] = { status: {} };
+  const registro = painel.registros[data];
+  painel.grupos.forEach((grupo, gi) => grupo.membros.forEach((_, mi) => {
+    const chave = chavePessoa(gi, mi);
+    if (!registro.status[chave]) registro.status[chave] = "PRESENTE";
+  }));
+  return registro;
 }
 
-function abrirTodosGrupos() {
-  expandido.clear();
-  dados.grupos.forEach((_, indice) => expandido.add(indice));
+function statusNaData(gi, mi, data = dataAtual) {
+  return garantirRegistro(data).status[chavePessoa(gi, mi)] || "PRESENTE";
 }
 
-function atualizarData() {
-  const hoje = new Date();
-  document.getElementById("data-hoje").textContent = hoje.toLocaleDateString("pt-BR", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric"
-  });
-  dados.data = hoje.toLocaleDateString("pt-BR");
+function setStatusNaData(gi, mi, status, data = dataAtual) {
+  garantirRegistro(data).status[chavePessoa(gi, mi)] = status;
 }
 
-function todosMembros() {
-  return dados.grupos.flatMap(grupo => grupo.membros);
+function formatarData(data) {
+  return new Date(`${data}T12:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
 }
 
-function contarStatus() {
-  const membros = todosMembros();
+function classeStatus(status) { return status.toLowerCase().replace(/\s+/g, "-"); }
+function proximoStatus(status) {
+  const ordem = ["PRESENTE", "FALTA", "AUSENTE MD"];
+  return ordem[(ordem.indexOf(status) + 1) % ordem.length];
+}
+
+function membrosDoDia(data = dataAtual) {
+  return painel.grupos.flatMap((grupo, gi) => grupo.membros.map((membro, mi) => ({ ...membro, grupo: grupo.titulo, gi, mi, status: statusNaData(gi, mi, data) })));
+}
+
+function contagemDoDia(data = dataAtual) {
+  const membros = membrosDoDia(data);
   return {
+    total: membros.length,
     presentes: membros.filter(m => m.status === "PRESENTE").length,
     faltas: membros.filter(m => m.status === "FALTA").length,
-    ausentesMd: membros.filter(m => m.status === "AUSENTE MD").length,
-    total: membros.length
+    ausentesMd: membros.filter(m => m.status === "AUSENTE MD").length
   };
 }
 
-function classeStatus(status) {
-  return status.toLowerCase().replace(/\s+/g, "-");
+function datasDoMes() { return Object.keys(painel.registros).filter(data => data.startsWith(dataAtual.slice(0, 7))).sort(); }
+
+function dadosMensais() {
+  const acumulado = {};
+  datasDoMes().forEach(data => {
+    membrosDoDia(data).forEach(membro => {
+      const chave = chavePessoa(membro.gi, membro.mi);
+      if (!acumulado[chave]) acumulado[chave] = { nome: membro.nome, funcao: membro.funcao, grupo: membro.grupo, presentes: 0, faltas: 0, ausentesMd: 0 };
+      if (membro.status === "PRESENTE") acumulado[chave].presentes += 1;
+      if (membro.status === "FALTA") acumulado[chave].faltas += 1;
+      if (membro.status === "AUSENTE MD") acumulado[chave].ausentesMd += 1;
+    });
+  });
+  return Object.values(acumulado);
 }
 
-function proximoStatus(status) {
-  const ordem = ["PRESENTE", "FALTA", "AUSENTE MD"];
-  const indiceAtual = ordem.indexOf(status);
-  return ordem[(indiceAtual + 1) % ordem.length];
-}
-
-function nomeCurto(nome) {
-  const partes = nome.split(" ");
-  return partes.length > 1 ? `${partes[0]} ${partes[1]}` : partes[0];
-}
+function nomeCurto(nome) { const p = nome.split(" "); return p.length > 1 ? `${p[0]} ${p[1]}` : p[0]; }
 
 function renderVisaoGeral() {
-  const status = contarStatus();
-  const percentual = status.total ? Math.round((status.presentes / status.total) * 100) : 0;
-  const html = `
-    <div class="stat-card verde">
-      <span class="stat-numero">${status.presentes}</span>
-      <span class="stat-label">Presentes</span>
-      <span class="stat-extra">Equipe disponível hoje</span>
-    </div>
-    <div class="stat-card vermelho">
-      <span class="stat-numero">${status.faltas}</span>
-      <span class="stat-label">Faltas</span>
-      <span class="stat-extra">Ausências sem presença</span>
-    </div>
-    <div class="stat-card laranja">
-      <span class="stat-numero">${status.ausentesMd}</span>
-      <span class="stat-label">Ausente MD</span>
-      <span class="stat-extra">Afastamento / ausência MD</span>
-    </div>
-    <div class="stat-card azul">
-      <span class="stat-numero">${percentual}%</span>
-      <span class="stat-label">Presença Geral</span>
-      <span class="stat-extra">${status.total} funcionários no total</span>
-    </div>
-  `;
-
-  document.getElementById("visao-geral").innerHTML = html;
+  const s = contagemDoDia();
+  const percentual = s.total ? Math.round((s.presentes / s.total) * 100) : 0;
+  document.getElementById("visao-geral").innerHTML = `
+    <div class="stat-card verde"><span class="stat-numero">${s.presentes}</span><span class="stat-label">Presentes</span><span class="stat-extra">Equipe disponível em ${formatarData(dataAtual)}</span></div>
+    <div class="stat-card vermelho"><span class="stat-numero">${s.faltas}</span><span class="stat-label">Faltas</span><span class="stat-extra">Ausências registradas no dia</span></div>
+    <div class="stat-card laranja"><span class="stat-numero">${s.ausentesMd}</span><span class="stat-label">Ausente MD</span><span class="stat-extra">Afastamento / ausência médica</span></div>
+    <div class="stat-card azul"><span class="stat-numero">${percentual}%</span><span class="stat-label">Presença Geral</span><span class="stat-extra">${s.total} funcionários cadastrados</span></div>`;
 }
 
 function renderGrupos() {
   const container = document.getElementById("grupos");
-
-  container.innerHTML = dados.grupos.map((grupo, gi) => {
-    const presentes = grupo.membros.filter(m => m.status === "PRESENTE").length;
-    const taxaPresenca = grupo.membros.length ? Math.round((presentes / grupo.membros.length) * 100) : 0;
+  container.innerHTML = painel.grupos.map((grupo, gi) => {
+    const presentes = grupo.membros.filter((_, mi) => statusNaData(gi, mi) === "PRESENTE").length;
+    const taxa = grupo.membros.length ? Math.round((presentes / grupo.membros.length) * 100) : 0;
     const temMeta = grupo.previsto > 0;
     const taxaMeta = temMeta ? Math.round((grupo.entregue / grupo.previsto) * 100) : 0;
     const corMeta = taxaMeta >= 80 ? "verde" : taxaMeta >= 50 ? "laranja" : "vermelho";
-
-    return `
-      <div class="grupo-card">
-        <div class="grupo-header">
-          <div class="grupo-titulo-area">
-            <h3 ondblclick="editarTituloGrupo(${gi})">${grupo.titulo}</h3>
-            <span class="grupo-sub">
-              ${grupo.membros.length} pessoas • ${presentes} presentes (${taxaPresenca}%)
-              ${temMeta ? ` • Previsto <strong class="cel-editavel" ondblclick="editarNumeroGrupo(${gi}, 'previsto')">${grupo.previsto}</strong> / Entregue <strong class="cel-editavel" ondblclick="editarNumeroGrupo(${gi}, 'entregue')">${grupo.entregue}</strong>` : ""}
-            </span>
-          </div>
-          <div class="grupo-acoes">
-            ${temMeta ? `<span class="badge-meta ${corMeta}">${taxaMeta}% da meta</span>` : ""}
-            <button class="btn-icon" onclick="toggleGrupo(${gi})" title="Abrir ou recolher">${expandido.has(gi) ? "▲" : "▼"}</button>
-            <button class="btn-icon" onclick="adicionarMembro(${gi})" title="Adicionar funcionário">➕</button>
-            <button class="btn-icon" onclick="removerGrupo(${gi})" title="Remover projeto">🗑️</button>
-          </div>
-        </div>
-
-        <div class="grupo-membros ${expandido.has(gi) ? "" : "recolhido"}">
-          <table class="tabela-membros">
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th>Função</th>
-                <th>Atividade</th>
-                <th>Status</th>
-                <th>Ação</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${grupo.membros.map((membro, mi) => `
-                <tr data-status="${classeStatus(membro.status)}">
-                  <td class="cel-nome" ondblclick="editarCampo(${gi}, ${mi}, 'nome')">${membro.nome}</td>
-                  <td class="cel-funcao" ondblclick="editarCampo(${gi}, ${mi}, 'funcao')">${membro.funcao}</td>
-                  <td class="cel-atividade" ondblclick="editarCampo(${gi}, ${mi}, 'atividade')">${membro.atividade}</td>
-                  <td>
-                    <button class="btn-status ${classeStatus(membro.status)}" onclick="alternarStatus(${gi}, ${mi})">${membro.status}</button>
-                  </td>
-                  <td>
-                    <button class="btn-icon" onclick="removerMembro(${gi}, ${mi})" title="Remover funcionário">🗑️</button>
-                  </td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
+    return `<div class="grupo-card">
+      <div class="grupo-header"><div class="grupo-titulo-area"><h3 ondblclick="editarTituloGrupo(${gi})">${grupo.titulo}</h3><span class="grupo-sub">${grupo.membros.length} pessoas · ${presentes} presentes (${taxa}%)${temMeta ? ` · Previsto <strong class="cel-editavel" ondblclick="editarNumeroGrupo(${gi}, 'previsto')">${grupo.previsto}</strong> / Entregue <strong class="cel-editavel" ondblclick="editarNumeroGrupo(${gi}, 'entregue')">${grupo.entregue}</strong>` : ""}</span></div>
+      <div class="grupo-acoes">${temMeta ? `<span class="badge-meta ${corMeta}">${taxaMeta}% da meta</span>` : ""}<button class="btn-icon" onclick="toggleGrupo(${gi})" title="Abrir ou recolher">${expandido.has(gi) ? "▲" : "▼"}</button><button class="btn-icon" onclick="adicionarMembro(${gi})" title="Adicionar funcionário">+</button><button class="btn-icon" onclick="removerGrupo(${gi})" title="Remover projeto">×</button></div></div>
+      <div class="grupo-membros ${expandido.has(gi) ? "" : "recolhido"}"><table class="tabela-membros"><thead><tr><th>Nome</th><th>Função</th><th>Atividade</th><th>Status em ${dataAtual.split("-").reverse().join("/")}</th><th>Ação</th></tr></thead><tbody>
+      ${grupo.membros.map((membro, mi) => { const status = statusNaData(gi, mi); return `<tr data-status="${classeStatus(status)}"><td class="cel-nome" ondblclick="editarCampo(${gi}, ${mi}, 'nome')">${membro.nome}</td><td class="cel-funcao" ondblclick="editarCampo(${gi}, ${mi}, 'funcao')">${membro.funcao}</td><td class="cel-atividade" ondblclick="editarCampo(${gi}, ${mi}, 'atividade')">${membro.atividade}</td><td><button class="btn-status ${classeStatus(status)}" onclick="alternarStatus(${gi}, ${mi})">${status}</button></td><td><button class="btn-icon" onclick="removerMembro(${gi}, ${mi})" title="Remover funcionário">×</button></td></tr>`; }).join("")}
+      </tbody></table></div></div>`;
   }).join("");
 }
 
-function toggleGrupo(gi) {
-  if (expandido.has(gi)) expandido.delete(gi);
-  else expandido.add(gi);
-  renderGrupos();
-}
+function toggleGrupo(gi) { if (expandido.has(gi)) expandido.delete(gi); else expandido.add(gi); renderGrupos(); }
+function alternarStatus(gi, mi) { setStatusNaData(gi, mi, proximoStatus(statusNaData(gi, mi))); salvarPainel(); renderizarTudo(); }
 
 function editarCampo(gi, mi, campo) {
-  const valorAtual = dados.grupos[gi].membros[mi][campo];
-  const rotulo = campo.charAt(0).toUpperCase() + campo.slice(1);
-  const novoValor = prompt(`Editar ${rotulo}:`, valorAtual);
-  if (novoValor === null || novoValor.trim() === "") return;
-  dados.grupos[gi].membros[mi][campo] = novoValor.trim().toUpperCase();
-  salvarDados();
-  renderizarTudo();
-}
-
-function editarTituloGrupo(gi) {
-  const atual = dados.grupos[gi].titulo;
-  const novo = prompt("Editar nome do projeto:", atual);
-  if (novo === null || novo.trim() === "") return;
-  dados.grupos[gi].titulo = novo.trim().toUpperCase();
-  salvarDados();
-  renderizarTudo();
-}
-
-function editarNumeroGrupo(gi, campo) {
-  const atual = dados.grupos[gi][campo];
+  const atual = painel.grupos[gi].membros[mi][campo];
   const novo = prompt(`Editar ${campo}:`, atual);
-  if (novo === null || novo.trim() === "") return;
-  const numero = Number(novo);
-  if (Number.isNaN(numero) || numero < 0) {
-    alert("Digite um número válido.");
-    return;
-  }
-  dados.grupos[gi][campo] = numero;
-  salvarDados();
-  renderizarTudo();
+  if (novo === null || !novo.trim()) return;
+  painel.grupos[gi].membros[mi][campo] = novo.trim().toUpperCase(); salvarPainel(); renderizarTudo();
 }
+function editarTituloGrupo(gi) { const novo = prompt("Editar nome do projeto:", painel.grupos[gi].titulo); if (novo && novo.trim()) { painel.grupos[gi].titulo = novo.trim().toUpperCase(); salvarPainel(); renderizarTudo(); } }
+function editarNumeroGrupo(gi, campo) { const novo = Number(prompt(`Editar ${campo}:`, painel.grupos[gi][campo])); if (!Number.isNaN(novo) && novo >= 0) { painel.grupos[gi][campo] = novo; salvarPainel(); renderizarTudo(); } }
+function adicionarGrupo() { const titulo = prompt("Nome do novo projeto:"); if (!titulo || !titulo.trim()) return; painel.grupos.push({ titulo: titulo.trim().toUpperCase(), previsto: 0, entregue: 0, membros: [] }); expandido.add(painel.grupos.length - 1); salvarPainel(); renderizarTudo(); }
+function removerGrupo(gi) { if (!confirm(`Remover o projeto "${painel.grupos[gi].titulo}"?`)) return; painel.grupos.splice(gi, 1); abrirTodosGrupos(); salvarPainel(); renderizarTudo(); }
+function adicionarMembro(gi) { const nome = prompt("Nome do funcionário:"); if (!nome || !nome.trim()) return; const funcao = prompt("Função:", "ASSISTENTE") || "ASSISTENTE"; const atividade = prompt("Atividade:", "INSPEÇÃO") || "INSPEÇÃO"; painel.grupos[gi].membros.push({ nome: nome.trim().toUpperCase(), funcao: funcao.trim().toUpperCase(), atividade: atividade.trim().toUpperCase() }); garantirRegistro(dataAtual); salvarPainel(); renderizarTudo(); }
+function removerMembro(gi, mi) { if (!confirm(`Remover ${painel.grupos[gi].membros[mi].nome}?`)) return; painel.grupos[gi].membros.splice(mi, 1); salvarPainel(); renderizarTudo(); }
 
-function alternarStatus(gi, mi) {
-  dados.grupos[gi].membros[mi].status = proximoStatus(dados.grupos[gi].membros[mi].status);
-  salvarDados();
-  renderizarTudo();
-}
+function mudarData(novaData) { dataAtual = novaData; garantirRegistro(dataAtual); salvarPainel(); renderizarTudo(); }
+function irParaHoje() { const hoje = hojeISO(); document.getElementById("data-painel").value = hoje; mudarData(hoje); }
+function abrirTodosGrupos() { expandido.clear(); painel.grupos.forEach((_, i) => expandido.add(i)); }
 
-function adicionarGrupo() {
-  const titulo = prompt("Nome do novo projeto:");
-  if (titulo === null || titulo.trim() === "") return;
+function destruir(nome) { if (graficos[nome]) graficos[nome].destroy(); }
+function opcoesBase() { return { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: "#141413", font: { family: "Georgia", size: 14 } } } } }; }
 
-  const previsto = Number(prompt("Quantidade prevista (pode ser 0):", "0") || "0");
-  const entregue = Number(prompt("Quantidade entregue (pode ser 0):", "0") || "0");
-
-  dados.grupos.push({
-    titulo: titulo.trim().toUpperCase(),
-    previsto: Number.isNaN(previsto) ? 0 : previsto,
-    entregue: Number.isNaN(entregue) ? 0 : entregue,
-    membros: []
-  });
-
-  expandido.add(dados.grupos.length - 1);
-  salvarDados();
-  renderizarTudo();
-}
-
-function removerGrupo(gi) {
-  const nome = dados.grupos[gi].titulo;
-  if (!confirm(`Remover o projeto "${nome}"?`)) return;
-  dados.grupos.splice(gi, 1);
-  abrirTodosGrupos();
-  salvarDados();
-  renderizarTudo();
-}
-
-function adicionarMembro(gi) {
-  const nome = prompt("Nome do funcionário:");
-  if (nome === null || nome.trim() === "") return;
-
-  const funcao = prompt("Função:", "ASSISTENTE") || "ASSISTENTE";
-  const atividade = prompt("Atividade:", "INSPEÇÃO") || "INSPEÇÃO";
-
-  dados.grupos[gi].membros.push({
-    nome: nome.trim().toUpperCase(),
-    funcao: funcao.trim().toUpperCase(),
-    atividade: atividade.trim().toUpperCase(),
-    status: "PRESENTE"
-  });
-
-  salvarDados();
-  renderizarTudo();
-}
-
-function removerMembro(gi, mi) {
-  const nome = dados.grupos[gi].membros[mi].nome;
-  if (!confirm(`Remover ${nome}?`)) return;
-  dados.grupos[gi].membros.splice(mi, 1);
-  salvarDados();
-  renderizarTudo();
-}
-
-function destruirGrafico(instancia) {
-  if (instancia) instancia.destroy();
-}
-
-function renderGraficoPresenca() {
-  const ctx = document.getElementById("graficoPresenca").getContext("2d");
-  const status = contarStatus();
-  destruirGrafico(graficoPresenca);
-
-  graficoPresenca = new Chart(ctx, {
-    type: "doughnut",
-    data: {
-      labels: ["Presentes", "Faltas", "Ausente MD"],
-      datasets: [{
-        data: [status.presentes, status.faltas, status.ausentesMd],
-        backgroundColor: ["#1f8f52", "#c53a32", "#c97b14"],
-        borderColor: ["#ffffff", "#ffffff", "#ffffff"],
-        borderWidth: 4
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: "62%",
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: {
-            padding: 18,
-            font: { size: 14, weight: "700" }
-          }
-        }
-      }
-    }
-  });
-}
+function renderGraficoPresenca() { const s = contagemDoDia(); destruir("presenca"); graficos.presenca = new Chart(document.getElementById("graficoPresenca"), { type: "doughnut", data: { labels: ["Presentes", "Faltas", "Ausente MD"], datasets: [{ data: [s.presentes, s.faltas, s.ausentesMd], backgroundColor: ["#6f876f", "#c6613f", "#b69a72"], borderColor: "#f0eee6", borderWidth: 4 }] }, options: { ...opcoesBase(), cutout: "62%" } }); }
 
 function renderGraficoFaltas() {
-  const ctx = document.getElementById("graficoFaltas").getContext("2d");
-  const faltosos = todosMembros().filter(m => m.status === "FALTA" || m.status === "AUSENTE MD");
-  const contagem = {};
+  const mensal = dadosMensais()
+    .filter(pessoa => pessoa.faltas + pessoa.ausentesMd > 0)
+    .sort((a, b) => (b.faltas + b.ausentesMd) - (a.faltas + a.ausentesMd));
 
-  faltosos.forEach(membro => {
-    const chave = nomeCurto(membro.nome);
-    contagem[chave] = (contagem[chave] || 0) + 1;
-  });
-
-  destruirGrafico(graficoFaltas);
-
-  const labels = Object.keys(contagem);
-  const valores = Object.values(contagem);
-
-  if (labels.length === 0) {
-    document.getElementById("resumo-faltas").innerHTML = '<p class="sem-dados">Nenhuma falta registrada no estado atual do painel.</p>';
-    graficoFaltas = new Chart(ctx, {
-      type: "bar",
-      data: { labels: ["Sem faltas"], datasets: [{ data: [0], backgroundColor: ["#dbe2ee"] }] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
-      }
-    });
-    return;
-  }
-
-  graficoFaltas = new Chart(ctx, {
+  destruir("faltas");
+  graficos.faltas = new Chart(document.getElementById("graficoFaltas"), {
     type: "bar",
     data: {
-      labels,
+      labels: mensal.length ? mensal.map(pessoa => nomeCurto(pessoa.nome)) : ["Sem faltas"],
       datasets: [{
-        label: "Faltas / ausências",
-        data: valores,
-        backgroundColor: "#c53a32",
-        borderRadius: 10
+        data: mensal.length ? mensal.map(pessoa => pessoa.faltas + pessoa.ausentesMd) : [0],
+        backgroundColor: "#c6613f",
+        borderRadius: 0
       }]
     },
     options: {
+      ...opcoesBase(),
       indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
+      plugins: { legend: { display: false } },
       scales: {
         x: {
           beginAtZero: true,
-          ticks: { precision: 0, stepSize: 1 }
+          ticks: { precision: 0, color: "#3d3d3a" },
+          grid: { color: "#cccbc8" }
+        },
+        y: {
+          ticks: { color: "#3d3d3a" },
+          grid: { display: false }
         }
       }
     }
   });
 
-  const maior = labels[valores.indexOf(Math.max(...valores))];
-  const total = valores.reduce((acc, valor) => acc + valor, 0);
-  document.getElementById("resumo-faltas").innerHTML = `<p>Total de faltas/ausências no painel atual: <strong>${total}</strong>. Maior destaque: <strong>${maior}</strong>.</p>`;
+  const texto = mensal.length
+    ? `No mês selecionado há ${datasDoMes().length} dia(s) salvo(s). Quem tem mais ausência: <strong>${mensal[0].nome}</strong> (${mensal[0].faltas + mensal[0].ausentesMd} ocorrência(s)).`
+    : "Ainda não há faltas no mês selecionado.";
+  document.getElementById("resumo-faltas").innerHTML = `<p>${texto}</p>`;
 }
 
 function renderGraficoProjetos() {
-  const ctx = document.getElementById("graficoProjetos").getContext("2d");
-  destruirGrafico(graficoProjetos);
-
-  const labels = dados.grupos.map(g => g.titulo.length > 22 ? `${g.titulo.slice(0, 22)}...` : g.titulo);
-  const valores = dados.grupos.map(g => {
-    if (!g.membros.length) return 0;
-    const presentes = g.membros.filter(m => m.status === "PRESENTE").length;
-    return Math.round((presentes / g.membros.length) * 100);
+  const labels = painel.grupos.map(grupo => grupo.titulo.length > 22 ? `${grupo.titulo.slice(0, 22)}…` : grupo.titulo);
+  const valores = painel.grupos.map((grupo, gi) => {
+    const total = grupo.membros.length;
+    const presentes = grupo.membros.filter((_, mi) => statusNaData(gi, mi) === "PRESENTE").length;
+    return total ? Math.round((presentes / total) * 100) : 0;
   });
 
-  graficoProjetos = new Chart(ctx, {
+  destruir("projetos");
+  graficos.projetos = new Chart(document.getElementById("graficoProjetos"), {
     type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: "% de presença",
-        data: valores,
-        backgroundColor: "#2070d8",
-        borderRadius: 10
-      }]
-    },
+    data: { labels, datasets: [{ data: valores, backgroundColor: "#806143", borderRadius: 0 }] },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
+      ...opcoesBase(),
+      plugins: { legend: { display: false } },
       scales: {
-        y: {
-          beginAtZero: true,
-          max: 100,
-          ticks: {
-            callback: valor => `${valor}%`
-          }
-        }
+        y: { beginAtZero: true, max: 100, ticks: { callback: valor => `${valor}%`, color: "#3d3d3a" }, grid: { color: "#cccbc8" } },
+        x: { ticks: { color: "#3d3d3a" }, grid: { display: false } }
       }
     }
   });
-}
-
-function gerarResumoMensalIlustrativo() {
-  const base = contarStatus();
-  const faltasBase = base.faltas + base.ausentesMd;
-  return {
-    labels: ["Mar", "Abr", "Mai", "Jun", "Jul"],
-    valores: [Math.max(1, faltasBase - 2), Math.max(1, faltasBase + 1), Math.max(1, faltasBase), Math.max(1, faltasBase + 3), Math.max(1, faltasBase + 2)]
-  };
 }
 
 function renderGraficoMeses() {
-  const ctx = document.getElementById("graficoMeses").getContext("2d");
-  destruirGrafico(graficoMeses);
+  const porMes = {};
+  Object.keys(painel.registros).forEach(data => {
+    const mes = data.slice(0, 7);
+    if (!porMes[mes]) porMes[mes] = 0;
+    membrosDoDia(data).forEach(membro => {
+      if (membro.status !== "PRESENTE") porMes[mes] += 1;
+    });
+  });
 
-  const mensal = gerarResumoMensalIlustrativo();
-  graficoMeses = new Chart(ctx, {
+  const labels = Object.keys(porMes).sort();
+  const formatados = labels.map(mes => new Date(`${mes}-01T12:00:00`).toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }));
+  destruir("meses");
+  graficos.meses = new Chart(document.getElementById("graficoMeses"), {
     type: "line",
     data: {
-      labels: mensal.labels,
+      labels: labels.length ? formatados : ["Sem histórico"],
       datasets: [{
-        label: "Faltas por mês",
-        data: mensal.valores,
-        borderColor: "#c97b14",
-        backgroundColor: "rgba(201, 123, 20, 0.16)",
-        tension: 0.35,
+        data: labels.length ? labels.map(mes => porMes[mes]) : [0],
+        borderColor: "#806143",
+        backgroundColor: "rgba(128, 97, 67, .12)",
         fill: true,
-        pointRadius: 4,
-        pointHoverRadius: 5
+        tension: 0.25,
+        pointBackgroundColor: "#806143"
       }]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
+      ...opcoesBase(),
+      plugins: { legend: { display: false } },
       scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { stepSize: 1 }
-        }
+        y: { beginAtZero: true, ticks: { precision: 0, color: "#3d3d3a" }, grid: { color: "#cccbc8" } },
+        x: { ticks: { color: "#3d3d3a" }, grid: { display: false } }
       }
     }
   });
 }
-
-function renderizarGraficos() {
-  renderGraficoPresenca();
-  renderGraficoFaltas();
-  renderGraficoProjetos();
-  renderGraficoMeses();
-}
+function renderizarGraficos() { renderGraficoPresenca(); renderGraficoFaltas(); renderGraficoProjetos(); renderGraficoMeses(); }
 
 function baixarDia() {
-  const wb = XLSX.utils.book_new();
-
-  const resumo = [
-    ["PAINEL DE PRESENÇA - STELLANTIS"],
-    ["Data:", dados.data],
-    [""],
-    ["RESUMO GERAL"],
-    ["Presentes:", contarStatus().presentes],
-    ["Faltas:", contarStatus().faltas],
-    ["Ausente MD:", contarStatus().ausentesMd],
-    ["Total:", contarStatus().total],
-    [""]
-  ];
-
-  dados.grupos.forEach(grupo => {
-    resumo.push([grupo.titulo]);
-    resumo.push(["Previsto:", grupo.previsto, "Entregue:", grupo.entregue]);
-    resumo.push(["Nome", "Função", "Atividade", "Status"]);
-    grupo.membros.forEach(membro => {
-      resumo.push([membro.nome, membro.funcao, membro.atividade, membro.status]);
-    });
-    resumo.push([""]);
-  });
-
-  const wsResumo = XLSX.utils.aoa_to_sheet(resumo);
-  XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo do Dia");
-
-  const planilha = [["Projeto", "Nome", "Função", "Atividade", "Status", "Previsto", "Entregue"]];
-  dados.grupos.forEach(grupo => {
-    grupo.membros.forEach(membro => {
-      planilha.push([grupo.titulo, membro.nome, membro.funcao, membro.atividade, membro.status, grupo.previsto, grupo.entregue]);
-    });
-  });
-  const wsCompleta = XLSX.utils.aoa_to_sheet(planilha);
-  XLSX.utils.book_append_sheet(wb, wsCompleta, "Equipe Completa");
-
-  XLSX.writeFile(wb, `Painel_Presenca_Stellantis_${dados.data.replace(/\//g, "-")}.xlsx`);
+  const wb = XLSX.utils.book_new(); const s = contagemDoDia();
+  const linhas = [["PAINEL DE PRESENÇA - STELLANTIS"],["Data", formatarData(dataAtual)],[""],["Presentes",s.presentes],["Faltas",s.faltas],["Ausente MD",s.ausentesMd],[""],["Projeto","Nome","Função","Atividade","Status"]];
+  membrosDoDia().forEach(m => linhas.push([m.grupo,m.nome,m.funcao,m.atividade,m.status]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(linhas), "Presença do Dia");
+  XLSX.writeFile(wb, `Presenca_Stellantis_${dataAtual}.xlsx`);
 }
 
 function baixarMes() {
-  const wb = XLSX.utils.book_new();
-
-  const faltas = [["Funcionário", "Função", "Atividade", "Status", "Projeto", "Data"]];
-  dados.grupos.forEach(grupo => {
-    grupo.membros.forEach(membro => {
-      if (membro.status === "FALTA" || membro.status === "AUSENTE MD") {
-        faltas.push([membro.nome, membro.funcao, membro.atividade, membro.status, grupo.titulo, dados.data]);
-      }
-    });
-  });
-
-  const desempenho = [["Projeto", "Previsto", "Entregue", "Taxa da Meta (%)", "Funcionários", "Presentes", "Presença (%)"]];
-  dados.grupos.forEach(grupo => {
-    const presentes = grupo.membros.filter(m => m.status === "PRESENTE").length;
-    const taxaPresenca = grupo.membros.length ? Math.round((presentes / grupo.membros.length) * 100) : 0;
-    const taxaMeta = grupo.previsto > 0 ? Math.round((grupo.entregue / grupo.previsto) * 100) : 0;
-    desempenho.push([grupo.titulo, grupo.previsto, grupo.entregue, taxaMeta, grupo.membros.length, presentes, taxaPresenca]);
-  });
-
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(faltas), "Faltas e Ausências");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(desempenho), "Desempenho");
-
-  XLSX.writeFile(wb, `Relatorio_Painel_Stellantis_${dados.data.replace(/\//g, "-")}.xlsx`);
+  const wb = XLSX.utils.book_new(); const mensal = dadosMensais();
+  const resumo = [["RELATÓRIO MENSAL - PAINEL DE PRESENÇA"],["Mês",new Date(`${dataAtual.slice(0,7)}-01T12:00:00`).toLocaleDateString("pt-BR",{month:"long",year:"numeric"})],["Dias salvos",datasDoMes().length],[""],["Funcionário","Função","Projeto","Presenças","Faltas","Ausente MD","Registros"]];
+  mensal.forEach(p => resumo.push([p.nome,p.funcao,p.grupo,p.presentes,p.faltas,p.ausentesMd,p.presentes+p.faltas+p.ausentesMd]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumo), "Resumo Mensal");
+  const diario = [["Data","Projeto","Funcionário","Função","Status"]]; Object.keys(painel.registros).sort().forEach(data => membrosDoDia(data).forEach(m => diario.push([data,m.grupo,m.nome,m.funcao,m.status])));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diario), "Histórico Diário");
+  XLSX.writeFile(wb, `Relatorio_Mensal_Stellantis_${dataAtual.slice(0,7)}.xlsx`);
 }
 
 function renderizarTudo() {
-  renderVisaoGeral();
-  renderGrupos();
-  renderizarGraficos();
+  document.getElementById("data-painel").value = dataAtual;
+  document.getElementById("data-hoje").textContent = formatarData(dataAtual);
+  document.getElementById("dias-salvos").textContent = Object.keys(painel.registros).length;
+  renderVisaoGeral(); renderGrupos(); renderizarGraficos();
 }
 
-function init() {
-  carregarDados();
-  atualizarData();
-  abrirTodosGrupos();
-  renderizarTudo();
-}
-
+function init() { carregarPainel(); dataAtual = hojeISO(); garantirRegistro(dataAtual); abrirTodosGrupos(); salvarPainel(); renderizarTudo(); }
 document.addEventListener("DOMContentLoaded", init);

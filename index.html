@@ -20,11 +20,13 @@
 
       <div class="topo-acoes">
         <div class="data-box">
-          <span class="data-label">Data de referência</span>
+          <label class="data-label" for="data-painel">Data de referência</label>
+          <input id="data-painel" type="date" onchange="mudarData(this.value)">
           <strong id="data-hoje"></strong>
         </div>
+        <button class="btn-topo" onclick="irParaHoje()">Voltar para hoje</button>
         <button class="btn-topo" onclick="baixarDia()">Baixar relatório do dia</button>
-        <button class="btn-topo secundario" onclick="baixarMes()">Baixar relatório geral</button>
+        <button class="btn-topo secundario" onclick="baixarMes()">Baixar relatório mensal</button>
       </div>
     </div>
   </header>
@@ -33,7 +35,7 @@
     <section class="painel-resumo" aria-label="Resumo da presença">
       <div class="secao-cabecalho">
         <p class="bloco-tag">Visão geral</p>
-        <p class="nota-secao">Dados atualizados automaticamente ao alterar um status.</p>
+        <p class="nota-secao">Dados atualizados automaticamente ao alterar um status. <strong><span id="dias-salvos">0</span> dia(s) salvo(s)</strong> no histórico.</p>
       </div>
       <div class="resumo-grid" id="visao-geral"></div>
     </section>
@@ -106,7 +108,7 @@
           <canvas id="graficoMeses"></canvas>
         </div>
         <div class="resumo-textual">
-          <p>Esta é uma base ilustrativa. O próximo passo é salvar a presença dia a dia para transformar este gráfico em histórico real.</p>
+          <p>Este gráfico usa os dias que você realmente salvou no painel. Quanto mais dias forem registrados, mais útil ficará a comparação entre os meses.</p>
         </div>
       </div>
     </section>
