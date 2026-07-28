@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel de Presença - Stellantis</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="chart.js"></script>
+  <script src="xlsx.js"></script>
+</head>
+<body>
+  <header class="topo">
+    <div class="marca-painel">STELLANTIS · G24</div>
+    <div class="topo-conteudo">
+      <div>
+        <p class="topo-etiqueta">Registro operacional diário</p>
+        <h1>Painel de Presença</h1>
+        <p class="topo-subtitulo">Acompanhamento de equipe, tarefas e desempenho por projeto.</p>
+      </div>
+
+      <div class="topo-acoes">
+        <div class="data-box">
+          <span class="data-label">Data de referência</span>
+          <strong id="data-hoje"></strong>
+        </div>
+        <button class="btn-topo" onclick="baixarDia()">Baixar relatório do dia</button>
+        <button class="btn-topo secundario" onclick="baixarMes()">Baixar relatório geral</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout-principal">
+    <section class="painel-resumo" aria-label="Resumo da presença">
+      <div class="secao-cabecalho">
+        <p class="bloco-tag">Visão geral</p>
+        <p class="nota-secao">Dados atualizados automaticamente ao alterar um status.</p>
+      </div>
+      <div class="resumo-grid" id="visao-geral"></div>
+    </section>
+
+    <section class="painel-graficos" aria-label="Indicadores de presença">
+      <div class="bloco bloco-grafico-principal">
+        <div class="bloco-cabecalho">
+          <div>
+            <p class="bloco-tag">Panorama do dia</p>
+            <h2>Presença Geral</h2>
+          </div>
+          <p class="legenda-ajuda">Distribuição atual da equipe.</p>
+        </div>
+        <div class="grafico-box grande">
+          <canvas id="graficoPresenca"></canvas>
+        </div>
+      </div>
+
+      <div class="bloco bloco-grafico-secundario">
+        <div class="bloco-cabecalho">
+          <div>
+            <p class="bloco-tag">Acompanhamento</p>
+            <h2>Faltas por Funcionário</h2>
+          </div>
+          <p class="legenda-ajuda">Ocorrências no registro atual.</p>
+        </div>
+        <div class="grafico-box media">
+          <canvas id="graficoFaltas"></canvas>
+        </div>
+        <div id="resumo-faltas" class="resumo-textual"></div>
+      </div>
+    </section>
+
+    <section class="bloco bloco-projetos" aria-label="Equipe por projeto">
+      <div class="bloco-cabecalho projetos-cabecalho">
+        <div>
+          <p class="bloco-tag">Operação</p>
+          <h2>Equipe por Projeto</h2>
+          <p class="legenda-ajuda">Clique no status para alternar. Dê duplo clique em um campo de texto, previsto ou entregue para editar.</p>
+        </div>
+        <div class="acoes-dia">
+          <button class="btn-add" onclick="adicionarGrupo()">Adicionar projeto</button>
+          <button class="btn-reset" onclick="resetarDados()">Restaurar dados originais</button>
+        </div>
+      </div>
+      <div id="grupos"></div>
+    </section>
+
+    <section class="painel-graficos painel-inferior" aria-label="Indicadores por projeto e mês">
+      <div class="bloco bloco-grafico-principal">
+        <div class="bloco-cabecalho">
+          <div>
+            <p class="bloco-tag">Desempenho operacional</p>
+            <h2>Presença por Projeto</h2>
+          </div>
+        </div>
+        <div class="grafico-box media">
+          <canvas id="graficoProjetos"></canvas>
+        </div>
+      </div>
+
+      <div class="bloco bloco-grafico-secundario">
+        <div class="bloco-cabecalho">
+          <div>
+            <p class="bloco-tag">Histórico inicial</p>
+            <h2>Meses com Mais Faltas</h2>
+          </div>
+        </div>
+        <div class="grafico-box media">
+          <canvas id="graficoMeses"></canvas>
+        </div>
+        <div class="resumo-textual">
+          <p>Esta é uma base ilustrativa. O próximo passo é salvar a presença dia a dia para transformar este gráfico em histórico real.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="rodape">Painel de Presença · Stellantis G24</footer>
+  <script src="script.js"></script>
+</body>
+</html>
