@@ -96,57 +96,116 @@ const DADOS_INICIAIS = {
 
 let dados = JSON.parse(JSON.stringify(DADOS_INICIAIS));
 const STORAGE_KEY = "painel-presenca-stellantis";
-const expandido = new Set();
-let graficoPresenca = null;
-let graficoFaltas = null;
-let graficoProjetos = null;
-let graficoMeses = null;
+const DAILY_STORAGE_KEY = "painel-presenca-stellantis-dias";
+let diaAtual = "";
+let grupoAtivo = 0;
 
 function clonarDadosIniciais() {
   return JSON.parse(JSON.stringify(DADOS_INICIAIS));
 }
 
+function hojeISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isoParaBR(iso) {
+  if (!iso) return "";
+  const [ano, mes, dia] = iso.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+function carregarHistorico() {
+  try {
+    return JSON.parse(localStorage.getItem(DAILY_STORAGE_KEY)) || {};
+  } catch (erro) {
+    return {};
+  }
+}
+
+function salvarHistorico(historico) {
+  localStorage.setItem(DAILY_STORAGE_KEY, JSON.stringify(historico));
+}
+
+function prepararDadosParaDia(base, iso) {
+  const copia = JSON.parse(JSON.stringify(base || DADOS_INICIAIS));
+  copia.data = isoParaBR(iso);
+  copia.grupos.forEach(grupo => {
+    grupo.membros.forEach(membro => {
+      membro.status = "PRESENTE";
+    });
+  });
+  return copia;
+}
+
 function salvarDados() {
+  if (!diaAtual) diaAtual = hojeISO();
+  dados.data = isoParaBR(diaAtual);
+  const historico = carregarHistorico();
+  historico[diaAtual] = dados;
+  salvarHistorico(historico);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(dados));
 }
 
-function carregarDados() {
-  const salvo = localStorage.getItem(STORAGE_KEY);
-  if (!salvo) {
-    dados = clonarDadosIniciais();
-    return;
-  }
-
-  try {
-    dados = JSON.parse(salvo);
-  } catch (erro) {
-    dados = clonarDadosIniciais();
+function carregarDados(iso = hojeISO()) {
+  diaAtual = iso;
+  const historico = carregarHistorico();
+  if (historico[diaAtual]) {
+    dados = historico[diaAtual];
+  } else {
+    const legado = localStorage.getItem(STORAGE_KEY);
+    if (legado) {
+      try {
+        dados = JSON.parse(legado);
+      } catch (erro) {
+        dados = clonarDadosIniciais();
+      }
+    } else {
+      dados = clonarDadosIniciais();
+    }
+    dados.data = isoParaBR(diaAtual);
+    salvarDados();
   }
 }
 
 function resetarDados() {
-  if (!confirm("Tem certeza? Isso vai apagar as edições e voltar ao painel original.")) return;
-  dados = clonarDadosIniciais();
-  localStorage.removeItem(STORAGE_KEY);
-  abrirTodosGrupos();
+  if (!confirm("Restaurar o dia selecionado para a base original?")) return;
+  dados = prepararDadosParaDia(DADOS_INICIAIS, diaAtual || hojeISO());
+  grupoAtivo = 0;
+  salvarDados();
   renderizarTudo();
-  alert("✅ Dados resetados com sucesso.");
 }
 
-function abrirTodosGrupos() {
-  expandido.clear();
-  dados.grupos.forEach((_, indice) => expandido.add(indice));
+function trocarDia(iso) {
+  if (!iso) return;
+  salvarDados();
+  carregarDados(iso);
+  grupoAtivo = 0;
+  renderizarTudo();
+}
+
+function iniciarNovoDia() {
+  salvarDados();
+  const sugerida = hojeISO();
+  const informada = prompt("Data do dia que inicia (AAAA-MM-DD):", sugerida);
+  if (informada === null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(informada.trim())) {
+    alert("Informe a data no formato AAAA-MM-DD.");
+    return;
+  }
+  const historico = carregarHistorico();
+  if (!historico[informada]) {
+    historico[informada] = prepararDadosParaDia(dados, informada);
+    salvarHistorico(historico);
+  }
+  carregarDados(informada);
+  grupoAtivo = 0;
+  renderizarTudo();
 }
 
 function atualizarData() {
-  const hoje = new Date();
-  document.getElementById("data-hoje").textContent = hoje.toLocaleDateString("pt-BR", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric"
-  });
-  dados.data = hoje.toLocaleDateString("pt-BR");
+  const input = document.getElementById("data-painel");
+  if (input) input.value = diaAtual || hojeISO();
+  dados.data = isoParaBR(diaAtual || hojeISO());
 }
 
 function todosMembros() {
@@ -181,96 +240,59 @@ function nomeCurto(nome) {
 function renderVisaoGeral() {
   const status = contarStatus();
   const percentual = status.total ? Math.round((status.presentes / status.total) * 100) : 0;
-  const html = `
-    <div class="stat-card verde">
-      <span class="stat-numero">${status.presentes}</span>
-      <span class="stat-label">Presentes</span>
-      <span class="stat-extra">Equipe disponível hoje</span>
-    </div>
-    <div class="stat-card vermelho">
-      <span class="stat-numero">${status.faltas}</span>
-      <span class="stat-label">Faltas</span>
-      <span class="stat-extra">Ausências sem presença</span>
-    </div>
-    <div class="stat-card laranja">
-      <span class="stat-numero">${status.ausentesMd}</span>
-      <span class="stat-label">Ausente MD</span>
-      <span class="stat-extra">Afastamento / ausência MD</span>
-    </div>
-    <div class="stat-card azul">
-      <span class="stat-numero">${percentual}%</span>
-      <span class="stat-label">Presença Geral</span>
-      <span class="stat-extra">${status.total} funcionários no total</span>
-    </div>
+  document.getElementById("visao-geral").innerHTML = `
+    <article class="metric-card"><span class="metric-icon blue">♙</span><div><p>Equipe total</p><strong>${status.total}</strong></div></article>
+    <article class="metric-card"><span class="metric-icon green">✓</span><div><p>Presentes hoje</p><strong>${status.presentes}</strong></div></article>
+    <article class="metric-card"><span class="metric-icon red">✕</span><div><p>Faltas</p><strong>${status.faltas}</strong></div></article>
+    <article class="metric-card"><span class="metric-icon blue">↗</span><div><p>Taxa de presença</p><strong>${percentual}%</strong></div></article>
   `;
+}
 
-  document.getElementById("visao-geral").innerHTML = html;
+function renderAbas() {
+  document.getElementById("abas-projetos").innerHTML = dados.grupos.map((grupo, gi) => `
+    <button class="tab ${gi === grupoAtivo ? "active" : ""}" onclick="selecionarGrupo(${gi})">
+      <span>STELLANTIS</span> ${grupo.titulo}
+    </button>
+  `).join("");
 }
 
 function renderGrupos() {
+  renderAbas();
   const container = document.getElementById("grupos");
+  const grupo = dados.grupos[grupoAtivo] || dados.grupos[0];
+  if (!grupo) {
+    container.innerHTML = '<div class="empty-state">Nenhum projeto cadastrado.</div>';
+    return;
+  }
+  const gi = grupoAtivo;
+  const faltas = grupo.membros.filter(m => m.status === "FALTA").length;
 
-  container.innerHTML = dados.grupos.map((grupo, gi) => {
-    const presentes = grupo.membros.filter(m => m.status === "PRESENTE").length;
-    const taxaPresenca = grupo.membros.length ? Math.round((presentes / grupo.membros.length) * 100) : 0;
-    const temMeta = grupo.previsto > 0;
-    const taxaMeta = temMeta ? Math.round((grupo.entregue / grupo.previsto) * 100) : 0;
-    const corMeta = taxaMeta >= 80 ? "verde" : taxaMeta >= 50 ? "laranja" : "vermelho";
-
-    return `
-      <div class="grupo-card">
-        <div class="grupo-header">
-          <div class="grupo-titulo-area">
-            <h3 ondblclick="editarTituloGrupo(${gi})">${grupo.titulo}</h3>
-            <span class="grupo-sub">
-              ${grupo.membros.length} pessoas • ${presentes} presentes (${taxaPresenca}%)
-              ${temMeta ? ` • Previsto <strong class="cel-editavel" ondblclick="editarNumeroGrupo(${gi}, 'previsto')">${grupo.previsto}</strong> / Entregue <strong class="cel-editavel" ondblclick="editarNumeroGrupo(${gi}, 'entregue')">${grupo.entregue}</strong>` : ""}
-            </span>
-          </div>
-          <div class="grupo-acoes">
-            ${temMeta ? `<span class="badge-meta ${corMeta}">${taxaMeta}% da meta</span>` : ""}
-            <button class="btn-icon" onclick="toggleGrupo(${gi})" title="Abrir ou recolher">${expandido.has(gi) ? "▲" : "▼"}</button>
-            <button class="btn-icon" onclick="adicionarMembro(${gi})" title="Adicionar funcionário">➕</button>
-            <button class="btn-icon" onclick="removerGrupo(${gi})" title="Remover projeto">🗑️</button>
-          </div>
-        </div>
-
-        <div class="grupo-membros ${expandido.has(gi) ? "" : "recolhido"}">
-          <table class="tabela-membros">
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th>Função</th>
-                <th>Atividade</th>
-                <th>Status</th>
-                <th>Ação</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${grupo.membros.map((membro, mi) => `
-                <tr data-status="${classeStatus(membro.status)}">
-                  <td class="cel-nome" ondblclick="editarCampo(${gi}, ${mi}, 'nome')">${membro.nome}</td>
-                  <td class="cel-funcao" ondblclick="editarCampo(${gi}, ${mi}, 'funcao')">${membro.funcao}</td>
-                  <td class="cel-atividade" ondblclick="editarCampo(${gi}, ${mi}, 'atividade')">${membro.atividade}</td>
-                  <td>
-                    <button class="btn-status ${classeStatus(membro.status)}" onclick="alternarStatus(${gi}, ${mi})">${membro.status}</button>
-                  </td>
-                  <td>
-                    <button class="btn-icon" onclick="removerMembro(${gi}, ${mi})" title="Remover funcionário">🗑️</button>
-                  </td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  }).join("");
+  container.innerHTML = `
+    <div class="project-toolbar">
+      <div class="project-title"><span>STELLANTIS</span><strong ondblclick="editarTituloGrupo(${gi})">${grupo.titulo}</strong><p>Previsto: <b ondblclick="editarNumeroGrupo(${gi}, 'previsto')">${grupo.previsto}</b> &nbsp; Entregue: <b ondblclick="editarNumeroGrupo(${gi}, 'entregue')">${grupo.entregue}</b> &nbsp; Faltas: <b class="danger">${faltas}</b></p></div>
+      <div class="project-actions"><button class="button ghost" onclick="editarTituloGrupo(${gi})">✎ Editar</button><button class="button outline" onclick="adicionarMembro(${gi})">＋ Adicionar funcionário</button><button class="icon-button" onclick="removerGrupo(${gi})">🗑</button></div>
+    </div>
+    <div class="table-wrap">
+      <table class="people-table">
+        <thead><tr><th>#</th><th>Nome</th><th>Função</th><th>Turno 1</th><th>Turno 2</th><th>Atividade</th><th>Status</th><th></th></tr></thead>
+        <tbody>${grupo.membros.map((membro, mi) => `
+          <tr>
+            <td>${mi + 1}</td>
+            <td class="name" ondblclick="editarCampo(${gi}, ${mi}, 'nome')">${membro.nome}</td>
+            <td ondblclick="editarCampo(${gi}, ${mi}, 'funcao')">${membro.funcao}</td>
+            <td>16:00 &nbsp;&nbsp; 20:00</td>
+            <td>21:00 &nbsp;&nbsp; 02:00</td>
+            <td ondblclick="editarCampo(${gi}, ${mi}, 'atividade')">${membro.atividade}</td>
+            <td><button class="status-pill ${classeStatus(membro.status)}" onclick="alternarStatus(${gi}, ${mi})">${membro.status}⌄</button></td>
+            <td class="row-actions"><button onclick="editarCampo(${gi}, ${mi}, 'nome')">✎</button><button onclick="removerMembro(${gi}, ${mi})">🗑</button></td>
+          </tr>`).join("")}</tbody>
+      </table>
+    </div>
+  `;
 }
 
-function toggleGrupo(gi) {
-  if (expandido.has(gi)) expandido.delete(gi);
-  else expandido.add(gi);
+function selecionarGrupo(gi) {
+  grupoAtivo = gi;
   renderGrupos();
 }
 
@@ -327,7 +349,7 @@ function adicionarGrupo() {
     membros: []
   });
 
-  expandido.add(dados.grupos.length - 1);
+  grupoAtivo = dados.grupos.length - 1;
   salvarDados();
   renderizarTudo();
 }
@@ -336,7 +358,7 @@ function removerGrupo(gi) {
   const nome = dados.grupos[gi].titulo;
   if (!confirm(`Remover o projeto "${nome}"?`)) return;
   dados.grupos.splice(gi, 1);
-  abrirTodosGrupos();
+  grupoAtivo = Math.max(0, Math.min(grupoAtivo, dados.grupos.length - 1));
   salvarDados();
   renderizarTudo();
 }
@@ -367,197 +389,7 @@ function removerMembro(gi, mi) {
   renderizarTudo();
 }
 
-function destruirGrafico(instancia) {
-  if (instancia) instancia.destroy();
-}
-
-function renderGraficoPresenca() {
-  const ctx = document.getElementById("graficoPresenca").getContext("2d");
-  const status = contarStatus();
-  destruirGrafico(graficoPresenca);
-
-  graficoPresenca = new Chart(ctx, {
-    type: "doughnut",
-    data: {
-      labels: ["Presentes", "Faltas", "Ausente MD"],
-      datasets: [{
-        data: [status.presentes, status.faltas, status.ausentesMd],
-        backgroundColor: ["#1f8f52", "#c53a32", "#c97b14"],
-        borderColor: ["#ffffff", "#ffffff", "#ffffff"],
-        borderWidth: 4
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: "62%",
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: {
-            padding: 18,
-            font: { size: 14, weight: "700" }
-          }
-        }
-      }
-    }
-  });
-}
-
-function renderGraficoFaltas() {
-  const ctx = document.getElementById("graficoFaltas").getContext("2d");
-  const faltosos = todosMembros().filter(m => m.status === "FALTA" || m.status === "AUSENTE MD");
-  const contagem = {};
-
-  faltosos.forEach(membro => {
-    const chave = nomeCurto(membro.nome);
-    contagem[chave] = (contagem[chave] || 0) + 1;
-  });
-
-  destruirGrafico(graficoFaltas);
-
-  const labels = Object.keys(contagem);
-  const valores = Object.values(contagem);
-
-  if (labels.length === 0) {
-    document.getElementById("resumo-faltas").innerHTML = '<p class="sem-dados">Nenhuma falta registrada no estado atual do painel.</p>';
-    graficoFaltas = new Chart(ctx, {
-      type: "bar",
-      data: { labels: ["Sem faltas"], datasets: [{ data: [0], backgroundColor: ["#dbe2ee"] }] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
-      }
-    });
-    return;
-  }
-
-  graficoFaltas = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: "Faltas / ausências",
-        data: valores,
-        backgroundColor: "#c53a32",
-        borderRadius: 10
-      }]
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
-      scales: {
-        x: {
-          beginAtZero: true,
-          ticks: { precision: 0, stepSize: 1 }
-        }
-      }
-    }
-  });
-
-  const maior = labels[valores.indexOf(Math.max(...valores))];
-  const total = valores.reduce((acc, valor) => acc + valor, 0);
-  document.getElementById("resumo-faltas").innerHTML = `<p>Total de faltas/ausências no painel atual: <strong>${total}</strong>. Maior destaque: <strong>${maior}</strong>.</p>`;
-}
-
-function renderGraficoProjetos() {
-  const ctx = document.getElementById("graficoProjetos").getContext("2d");
-  destruirGrafico(graficoProjetos);
-
-  const labels = dados.grupos.map(g => g.titulo.length > 22 ? `${g.titulo.slice(0, 22)}...` : g.titulo);
-  const valores = dados.grupos.map(g => {
-    if (!g.membros.length) return 0;
-    const presentes = g.membros.filter(m => m.status === "PRESENTE").length;
-    return Math.round((presentes / g.membros.length) * 100);
-  });
-
-  graficoProjetos = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: "% de presença",
-        data: valores,
-        backgroundColor: "#2070d8",
-        borderRadius: 10
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          max: 100,
-          ticks: {
-            callback: valor => `${valor}%`
-          }
-        }
-      }
-    }
-  });
-}
-
-function gerarResumoMensalIlustrativo() {
-  const base = contarStatus();
-  const faltasBase = base.faltas + base.ausentesMd;
-  return {
-    labels: ["Mar", "Abr", "Mai", "Jun", "Jul"],
-    valores: [Math.max(1, faltasBase - 2), Math.max(1, faltasBase + 1), Math.max(1, faltasBase), Math.max(1, faltasBase + 3), Math.max(1, faltasBase + 2)]
-  };
-}
-
-function renderGraficoMeses() {
-  const ctx = document.getElementById("graficoMeses").getContext("2d");
-  destruirGrafico(graficoMeses);
-
-  const mensal = gerarResumoMensalIlustrativo();
-  graficoMeses = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: mensal.labels,
-      datasets: [{
-        label: "Faltas por mês",
-        data: mensal.valores,
-        borderColor: "#c97b14",
-        backgroundColor: "rgba(201, 123, 20, 0.16)",
-        tension: 0.35,
-        fill: true,
-        pointRadius: 4,
-        pointHoverRadius: 5
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { stepSize: 1 }
-        }
-      }
-    }
-  });
-}
-
-function renderizarGraficos() {
-  renderGraficoPresenca();
-  renderGraficoFaltas();
-  renderGraficoProjetos();
-  renderGraficoMeses();
-}
+function renderizarGraficos() {}
 
 function baixarDia() {
   const wb = XLSX.utils.book_new();
@@ -600,41 +432,49 @@ function baixarDia() {
 }
 
 function baixarMes() {
+  salvarDados();
   const wb = XLSX.utils.book_new();
+  const historico = carregarHistorico();
+  const mesAtual = (diaAtual || hojeISO()).slice(0, 7);
 
-  const faltas = [["Funcionário", "Função", "Atividade", "Status", "Projeto", "Data"]];
-  dados.grupos.forEach(grupo => {
-    grupo.membros.forEach(membro => {
-      if (membro.status === "FALTA" || membro.status === "AUSENTE MD") {
-        faltas.push([membro.nome, membro.funcao, membro.atividade, membro.status, grupo.titulo, dados.data]);
-      }
+  const faltas = [["Data", "Funcionário", "Função", "Atividade", "Status", "Projeto"]];
+  const desempenho = [["Data", "Projeto", "Previsto", "Entregue", "Funcionários", "Presentes", "Faltas", "Ausente MD", "Presença (%)"]];
+
+  Object.keys(historico).sort().filter(data => data.startsWith(mesAtual)).forEach(data => {
+    historico[data].grupos.forEach(grupo => {
+      const presentes = grupo.membros.filter(m => m.status === "PRESENTE").length;
+      const faltasGrupo = grupo.membros.filter(m => m.status === "FALTA").length;
+      const ausentesMd = grupo.membros.filter(m => m.status === "AUSENTE MD").length;
+      const taxa = grupo.membros.length ? Math.round((presentes / grupo.membros.length) * 100) : 0;
+      desempenho.push([isoParaBR(data), grupo.titulo, grupo.previsto, grupo.entregue, grupo.membros.length, presentes, faltasGrupo, ausentesMd, taxa]);
+      grupo.membros.forEach(membro => {
+        if (membro.status === "FALTA" || membro.status === "AUSENTE MD") {
+          faltas.push([isoParaBR(data), membro.nome, membro.funcao, membro.atividade, membro.status, grupo.titulo]);
+        }
+      });
     });
   });
 
-  const desempenho = [["Projeto", "Previsto", "Entregue", "Taxa da Meta (%)", "Funcionários", "Presentes", "Presença (%)"]];
-  dados.grupos.forEach(grupo => {
-    const presentes = grupo.membros.filter(m => m.status === "PRESENTE").length;
-    const taxaPresenca = grupo.membros.length ? Math.round((presentes / grupo.membros.length) * 100) : 0;
-    const taxaMeta = grupo.previsto > 0 ? Math.round((grupo.entregue / grupo.previsto) * 100) : 0;
-    desempenho.push([grupo.titulo, grupo.previsto, grupo.entregue, taxaMeta, grupo.membros.length, presentes, taxaPresenca]);
-  });
-
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(faltas), "Faltas e Ausências");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(desempenho), "Desempenho");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(desempenho), "Desempenho Mensal");
+  XLSX.writeFile(wb, `Relatorio_Mensal_G24_${mesAtual}.xlsx`);
+}
 
-  XLSX.writeFile(wb, `Relatorio_Painel_Stellantis_${dados.data.replace(/\//g, "-")}.xlsx`);
+function renderHistoricoInfo() {
+  const total = Object.keys(carregarHistorico()).length;
+  const el = document.getElementById("historico-info");
+  if (el) el.textContent = `Dia selecionado: ${dados.data}. Histórico local com ${total} dia(s) salvo(s).`;
 }
 
 function renderizarTudo() {
+  atualizarData();
   renderVisaoGeral();
   renderGrupos();
-  renderizarGraficos();
+  renderHistoricoInfo();
 }
 
 function init() {
-  carregarDados();
-  atualizarData();
-  abrirTodosGrupos();
+  carregarDados(hojeISO());
   renderizarTudo();
 }
 

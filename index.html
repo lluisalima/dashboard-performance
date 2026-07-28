@@ -3,104 +3,46 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Painel de Presença - Stellantis</title>
+  <title>Controle de Presença — G24</title>
   <link rel="stylesheet" href="style.css">
-  <script src="chart.js"></script>
   <script src="xlsx.js"></script>
 </head>
 <body>
-  <header class="topo">
+  <header class="topbar">
     <div>
-      <p class="topo-etiqueta">Controle diário da equipe</p>
-      <h1>📋 Painel de Presença - Stellantis</h1>
-      <p class="topo-subtitulo">Visão rápida de presença, desempenho e faltas da equipe do Sérgio.</p>
+      <h1>Controle de Presença — G24</h1>
+      <p>Dashboard do coordenador para acompanhar presenças e desempenho por projeto.</p>
     </div>
 
-    <div class="topo-acoes">
-      <div class="data-box">
-        <span class="data-label">Data</span>
-        <strong id="data-hoje"></strong>
-      </div>
-      <button class="btn-topo" onclick="baixarDia()">📥 Baixar do Dia</button>
-      <button class="btn-topo secundario" onclick="baixarMes()">📊 Baixar Relatório</button>
+    <div class="topbar-actions">
+      <label class="date-control" title="Selecionar data salva">
+        <span>📅</span>
+        <input id="data-painel" type="date" onchange="trocarDia(this.value)">
+      </label>
+      <button class="button primary" onclick="baixarDia()">⇩ Baixar Diário</button>
+      <button class="button muted" onclick="baixarMes()">▦ Relatório Mensal</button>
     </div>
   </header>
 
-  <main class="layout-principal">
-    <section class="painel-resumo">
-      <div class="resumo-grid" id="visao-geral"></div>
-    </section>
+  <main class="page-shell">
+    <section id="visao-geral" class="metric-grid" aria-label="Resumo do dia"></section>
 
-    <section class="painel-graficos">
-      <div class="bloco bloco-grafico-principal">
-        <div class="bloco-cabecalho">
-          <div>
-            <p class="bloco-tag">Panorama do dia</p>
-            <h2>Presença Geral</h2>
-          </div>
-        </div>
-        <div class="grafico-box grande">
-          <canvas id="graficoPresenca"></canvas>
-        </div>
-      </div>
-
-      <div class="bloco bloco-grafico-secundario">
-        <div class="bloco-cabecalho">
-          <div>
-            <p class="bloco-tag">Atenção</p>
-            <h2>Faltas por Funcionário</h2>
-          </div>
-        </div>
-        <div class="grafico-box media">
-          <canvas id="graficoFaltas"></canvas>
-        </div>
-        <div id="resumo-faltas" class="resumo-textual"></div>
-      </div>
-    </section>
-
-    <section class="bloco bloco-projetos">
-      <div class="bloco-cabecalho projetos-cabecalho">
+    <section class="panel projects-panel">
+      <div class="panel-header">
         <div>
-          <p class="bloco-tag">Operação</p>
-          <h2>Equipe por Projeto</h2>
-          <p class="legenda-ajuda">Clique no status para alternar. Dê duplo clique em nome, função, atividade, previsto e entregue para editar.</p>
+          <h2>Projetos</h2>
+          <p>Cada aba representa um grupo de funcionários. Marque o status do dia diretamente na tabela.</p>
+          <p id="historico-info" class="history-hint"></p>
         </div>
-        <div class="acoes-dia">
-          <button class="btn-add" onclick="adicionarGrupo()">+ Novo Projeto</button>
-          <button class="btn-reset" onclick="resetarDados()">🔄 Resetar Dados</button>
+        <div class="panel-actions">
+          <button class="button outline" onclick="iniciarNovoDia()">＋ Inserir dados do dia</button>
+          <button class="button outline" onclick="adicionarGrupo()">＋ Novo projeto</button>
+          <button class="button outline" onclick="resetarDados()">↻ Restaurar</button>
         </div>
       </div>
 
+      <nav id="abas-projetos" class="tabs" aria-label="Projetos cadastrados"></nav>
       <div id="grupos"></div>
-    </section>
-
-    <section class="painel-graficos painel-inferior">
-      <div class="bloco bloco-grafico-principal">
-        <div class="bloco-cabecalho">
-          <div>
-            <p class="bloco-tag">Desempenho</p>
-            <h2>Presença por Projeto</h2>
-          </div>
-        </div>
-        <div class="grafico-box media">
-          <canvas id="graficoProjetos"></canvas>
-        </div>
-      </div>
-
-      <div class="bloco bloco-grafico-secundario">
-        <div class="bloco-cabecalho">
-          <div>
-            <p class="bloco-tag">Histórico ilustrativo</p>
-            <h2>Meses com Mais Faltas</h2>
-          </div>
-        </div>
-        <div class="grafico-box media">
-          <canvas id="graficoMeses"></canvas>
-        </div>
-        <div class="resumo-textual">
-          <p>Este gráfico mostra uma base mensal inicial para facilitar a visualização. Depois podemos transformar isso em histórico real salvo por mês.</p>
-        </div>
-      </div>
     </section>
   </main>
 
